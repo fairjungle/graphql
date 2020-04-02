@@ -38,6 +38,7 @@ import (
 	"io"
 	"mime/multipart"
 	"net/http"
+	"strings"
 
 	"github.com/pkg/errors"
 )
@@ -79,8 +80,6 @@ func (c *Client) logf(format string, args ...interface{}) {
 // Run executes the query and unmarshals the response from the data field
 // into the response object.
 // Pass in a nil response object to skip response parsing.
-// If the request fails or the server returns an error, the first error
-// will be returned.
 func (c *Client) Run(ctx context.Context, req *Request, resp interface{}) error {
 	select {
 	case <-ctx.Done():
@@ -144,8 +143,7 @@ func (c *Client) runWithJSON(ctx context.Context, req *Request, resp interface{}
 		return errors.Wrap(err, "decoding response")
 	}
 	if len(gr.Errors) > 0 {
-		// return first error
-		return gr.Errors[0]
+		return gr.Errors
 	}
 	return nil
 }
@@ -249,17 +247,42 @@ func ImmediatelyCloseReqBody() ClientOption {
 // modify the behaviour of the Client.
 type ClientOption func(*Client)
 
-type graphErr struct {
-	Message string
+// Error represents a GraphQL error
+type Error struct {
+	Message   string
+	Locations []struct {
+		Line   int
+		Column int
+	}
+	Path       []interface{}
+	Extensions map[string]interface{}
 }
 
-func (e graphErr) Error() string {
-	return "graphql: " + e.Message
+// Error implements error interface
+func (e Error) Error() string {
+	return fmt.Sprintf("graphql: %s", e.Message)
+}
+
+// Errors represents a list of GraphQL errors
+type Errors []Error
+
+// Error implements error interface
+func (l Errors) Error() string {
+	if len(l) == 0 {
+		return "no error"
+	}
+
+	result := make([]string, len(l))
+	for i, e := range l {
+		result[i] = e.Message
+	}
+
+	return fmt.Sprintf("graphql: %s", strings.Join(result, " | "))
 }
 
 type graphResponse struct {
 	Data   interface{}
-	Errors []graphErr
+	Errors Errors
 }
 
 // Request is a GraphQL request.
